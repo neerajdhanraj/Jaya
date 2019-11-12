@@ -1,0 +1,13 @@
+e2cdc928fb41b710c4ae1c556c6c443f *DESCRIPTION
+fd1238515cd5d3840451f9ba4e507e5a *NAMESPACE
+6ab888821ffac438072126039270cb21 *R/jaya.R
+79ac60ea7ba2fa58800a418c301a6dba *R/plotJaya.R
+b7c0b6fcda75040d701a7c1e15bd7d72 *R/summaryJaya.R
+7a3070f15580ff18138468d2ae664fa1 *build/vignette.rds
+50d47b390808e4faec79e3aa70a349d5 *inst/doc/A_guide_to_JA.R
+9ac6783cd1dbeb6448c1136178c9e74b *inst/doc/A_guide_to_JA.Rmd
+25483aa2092ff128521169998b40668a *inst/doc/A_guide_to_JA.html
+0bcbccb1894fc1accef0bb9d707abaa4 *man/jaya.Rd
+561a0a5bc4a188c6f492a3cc95f251fc *man/plot.jaya.Rd
+54414bd0e4362e42eb0887eed1befde7 *man/summary.jaya.Rd
+9ac6783cd1dbeb6448c1136178c9e74b *vignettes/A_guide_to_JA.Rmd
