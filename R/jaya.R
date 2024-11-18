@@ -1,151 +1,229 @@
-#' Jaya Algorithm, a gradient-free optimization algorithm.
-#' Maximization of a function using Jaya Algorithm (JA).
-#' A population based method which repeatedly modifies a population of individual solutions.
-#' Capable of solving both constrained and unconstrained optimization problems.
-#' Does not contain any hyperparameters.
+#' Jaya Algorithm for Single-Objective Optimization
 #'
-#' @param fun as a function to be optimized
-#' @param lower as a vector of lower bounds for the vaiables in the function
-#' @param upper as a vector of upper bounds for the vaiables in the function
-#' @param popSize as population size
-#' @param maxiter as number of iterations to run for finding optimum solution
-#' @param n_var as number of variables used in the function to optimize
-#' @param seed as an integer vector containing the random number generator state
-#' @param suggestions as a data frame of solutions string to be included in the initial population
-#' @param opt as a string either "maximize" or "minimize" the function
-#' @keywords optimization
-#' @importFrom stats runif
-#' @export
+#' @description Implements the Jaya optimization algorithm for single-objective optimization.
+#' The algorithm minimizes or maximizes the given objective function over specified bounds.
+#'
+#' @param objectives (optional) A list of functions for multi-objective optimization.
+#' @param constraints (optional) A list of constraints as functions returning <= 0 for feasibility.
+#' @param early_stopping Logical. If TRUE, stops optimization early based on tolerance and patience.
+#' @param tolerance Numeric. Tolerance for early stopping.
+#' @param patience Integer. Number of iterations to wait for improvement before stopping early.
+#' @param adaptive_pop Logical. If TRUE, enables adaptive population size adjustment.
+#' @param min_popSize Integer. Minimum population size for adaptive adjustment.
+#' @param max_popSize Integer. Maximum population size for adaptive adjustment.
+#' @param parallel Logical. If TRUE, enables parallel computation for evaluating population.
+#' @param cores Integer. Number of cores to use for parallel computation. Defaults to all available cores minus one.
+#' @param fun Objective function to be minimized or maximized (single-objective).
+#' @param lower Vector of lower bounds for the decision variables.
+#' @param upper Vector of upper bounds for the decision variables.
+#' @param popSize Size of the population for the optimization process.
+#' @param maxiter Maximum number of iterations.
+#' @param n_var Number of decision variables.
+#' @param seed Optional random seed for reproducibility.
+#' @param suggestions Optional data frame of initial population suggestions.
+#' @param opt Specify whether to "minimize" or "maximize" the objective function.
+#' @importFrom stats runif na.omit
+#' @importFrom utils head
+#' @importFrom graphics par
+#' @return A list containing the following:
+#' - `Best`: The best solution found (variable values and objective function value).
+#' - `Iterations`: Best objective function values at each iteration.
+#'
 #' @examples
-#' # Test Function to minimize
-#' square <- function(x){return((x[1]^2)+(x[2]^2))}
-#' jaya(fun = square, lower = c(-100,-100), upper = c(100,100), maxiter = 10, n_var = 2)
+#' # Example: Single-objective optimization
+#' sphere_function <- function(x) sum(x^2)
+#' result <- jaya(
+#'   fun = sphere_function,
+#'   lower = rep(-5, 3),
+#'   upper = rep(5, 3),
+#'   popSize = 20,
+#'   maxiter = 50,
+#'   n_var = 3,
+#'   opt = "minimize"
+#' )
+#' print(summary(result))
+#' plot(result)
+#'
+#' @export
 
-jaya <- function(fun, lower, upper, popSize = 50, maxiter, n_var, seed = NULL, suggestions = data.frame(), opt = "minimize")
-{
-  best <- NULL            # Stores minimum(best) result
-  worst <- NULL           # Stores worst result
-  best_each_iter <- c()   # Stores best f(x) values for each iteration
-  tab <- data.frame(1:(popSize - nrow(suggestions)))   # Table for storing variable and function values
+jaya <- function(
+    fun = NULL, lower, upper, popSize = 50, maxiter, n_var, seed = NULL,
+    suggestions = data.frame(), opt = "minimize",
+    objectives = NULL, constraints = list(),
+    early_stopping = FALSE, tolerance = 1e-6, patience = 10,
+    adaptive_pop = FALSE, min_popSize = 20, max_popSize = 100,
+    parallel = FALSE, cores = NULL) {
 
-  # Generate random values for variables in range(-100,100)
-  for (i in 1:n_var) {
-    if(!missing(seed)){
-      set.seed(seed)
-    }
-    x <- runif((popSize - nrow(suggestions)), min = lower[i], max = upper[i])
-    tab <- cbind(tab, x)
+  set.seed(seed)
+  is_multi_objective <- !is.null(objectives)
+  if (is_multi_objective) {
+    fun <- objectives
+  } else if (!is.null(fun)) {
+    fun <- list(fun)
+  } else {
+    stop("No objective function provided.")
   }
-  tab <- tab[,2:ncol(tab)]
-  names(tab) <- names(suggestions)
+
+  # Detect number of cores if not specified and parallel is enabled
+  if (parallel) {
+    if (is.null(cores)) {
+      cores <- max(parallel::detectCores() - 1, 1)
+    }
+    cl <- parallel::makeCluster(cores)
+    parallel::clusterExport(cl, varlist = ls(), envir = environment())
+  }
+
+  # Initialize population
+  tab <- data.frame(matrix(runif((popSize - nrow(suggestions)) * n_var,
+                                 min = rep(lower, each = popSize - nrow(suggestions)),
+                                 max = rep(upper, each = popSize - nrow(suggestions))),
+                           ncol = n_var))
+  colnames(tab) <- paste0("x", 1:n_var)
   tab <- rbind(suggestions, tab)
 
-  # Calculate values for f(x)
-  func_values <- c()
-  for (i in 1:popSize) {
-    func_values <- c(func_values, fun(data.frame(t(tab))[,i]))
-  }
-  tab <- cbind(tab, func_values)
-
-  # Find the best and worst f(x)
-  if(tolower(opt) == "minimize"){
-    best <- tab[which.min(tab[ , ncol(tab)]) , ]
-    worst <- tab[which.max(tab[ , ncol(tab)]) , ]
-  }
-  else if(tolower(opt) == "maximize"){
-    worst <- tab[which.min(tab[ , ncol(tab)]) , ]
-    best <- tab[which.max(tab[ , ncol(tab)]) , ]
-  }
-  else{
-    stop(paste('opt can have only 2 values : "minimize" or "maximize". Passed value is ', opt, '.'))
+  # Evaluate initial population
+  evaluate_population <- function(i) sapply(fun, function(f) f(as.numeric(tab[i, 1:n_var])))
+  tab$func_values <- if (is_multi_objective) {
+    if (parallel) {
+      parallel::parLapply(cl, seq_len(nrow(tab)), evaluate_population)
+    } else {
+      lapply(seq_len(nrow(tab)), evaluate_population)
+    }
+  } else {
+    apply(tab[, 1:n_var], 1, fun[[1]])
   }
 
-  best_each_iter <- c(best_each_iter, best[, ncol(best)])
+  # Initialize best/worst for single-objective and Pareto front for multi-objective
+  if (!is_multi_objective) {
+    if (tolower(opt) == "minimize") {
+      best <- tab[which.min(tab$func_values), ]
+      worst <- tab[which.max(tab$func_values), ]
+    } else {
+      best <- tab[which.max(tab$func_values), ]
+      worst <- tab[which.min(tab$func_values), ]
+    }
+    best_each_iter <- numeric(maxiter)
+    best_each_iter[1] <- best$func_values
+  } else {
+    pareto_front <- data.frame(matrix(ncol = n_var + length(fun)))
+    colnames(pareto_front) <- c(paste0("x", 1:n_var), paste0("f", 1:length(fun)))
+  }
 
-  # iterate till maxiter satisfies
-  i <- 0
-  while (i < maxiter) {
-    # Generate r1 and r2 random variables for each variable
+  # Enhanced non-dominated sorting function
+  non_dominated_sort <- function(values) {
+    values <- as.data.frame(do.call(rbind, values))
+    pareto_front <- list()
+    for (i in 1:nrow(values)) {
+      is_dominated <- FALSE
+      for (j in 1:nrow(values)) {
+        if (!anyNA(values[j, ]) && !anyNA(values[i, ])) {
+          if (all(values[j, ] <= values[i, ]) && any(values[j, ] < values[i, ])) {
+            is_dominated <- TRUE
+            break
+          }
+        }
+      }
+      if (!is_dominated) {
+        pareto_front[[length(pareto_front) + 1]] <- values[i, , drop = FALSE]
+      }
+    }
+    do.call(rbind, pareto_front)
+  }
+
+  # Main optimization loop
+  for (i in 1:maxiter) {
     r1 <- runif(n_var)
     r2 <- runif(n_var)
 
-    # For each row(candidate) in Table
-    for (can in 1:popSize) {
-      t <- c()
+    # Adaptive population adjustment
+    if (adaptive_pop && i %% 10 == 0) {
+      current_popSize <- max(min_popSize, min(nrow(tab) + ifelse(i %% 20 == 0, 5, -5), max_popSize))
+      tab <- tab[1:current_popSize, ]
+    }
 
-      # For each column(variable)
-      for (v in 1:n_var){
+    for (can in 1:nrow(tab)) {
+      candidate <- as.numeric(tab[can, 1:n_var])
 
-        # Update values for variables and store in t
-        x <- tab[can,v] + r1[v]*(best[v] - abs(tab[can,v])) - r2[v]*(worst[v] - abs(tab[can,v]))
-        if((lower[v] <= x) && (x <= upper[v]))
-        {
-          t <- c(t,data.frame(x)[,1])
-        }
+      if (!is_multi_objective) {
+        updated_candidate <- candidate + r1 * (best[1:n_var] - candidate) - r2 * (worst[1:n_var] - candidate)
+      } else {
+        best_index <- sample(1:nrow(tab), 1)
+        best_solution <- tab[best_index, 1:n_var]
+        updated_candidate <- candidate + r1 * (best_solution - candidate) - r2 * (runif(n_var) * 2 - 1)
       }
 
-      if(length(t) == n_var){
-        # Calculate new function value using new variables
-        new_func_val <- fun(t)
+      # Enforce boundaries
+      updated_candidate <- pmax(pmin(updated_candidate, upper), lower)
 
-        # If function value is better than original value, then, replace in Table
-        # Else, keep the original values
+      # Check constraints
+      feasible <- all(sapply(constraints, function(con) {
+        constraint_val <- con(updated_candidate)
+        !is.na(constraint_val) && constraint_val <= 0
+      }))
 
-        if(tolower(opt) == "minimize")
-        {
-          if(new_func_val < tab[can,ncol(tab)]) {
-            tab[can,] <- c(t, new_func_val)
+      if (feasible) {
+        new_func_val <- if (is_multi_objective) sapply(fun, function(f) f(updated_candidate)) else fun[[1]](updated_candidate)
+
+        if (!is_multi_objective) {
+          if ((tolower(opt) == "minimize" && new_func_val < tab$func_values[can]) ||
+              (tolower(opt) == "maximize" && new_func_val > tab$func_values[can])) {
+            tab[can, 1:n_var] <- updated_candidate
+            tab$func_values[can] <- new_func_val
           }
-        }
-        else if(tolower(opt) == "maximize")
-        {
-          if(new_func_val > tab[can,ncol(tab)]) {
-            tab[can,] <- c(t, new_func_val)
-          }
+        } else {
+          tab[can, 1:n_var] <- updated_candidate
+          tab$func_values[[can]] <- new_func_val
         }
       }
     }
 
-    # Update best and worst after updating table
-    if(tolower(opt) == "minimize")
-    {
-      best <- tab[which.min(tab[ , ncol(tab)]) , ]
-      worst <- tab[which.max(tab[ , ncol(tab)]) , ]
+    # Update Pareto front for multi-objective
+    if (is_multi_objective) {
+      func_values_df <- do.call(rbind, tab$func_values)
+      pareto_result <- non_dominated_sort(func_values_df)
+      if (!is.null(pareto_result) && ncol(pareto_result) == ncol(pareto_front)) {
+        colnames(pareto_result) <- colnames(pareto_front)
+        pareto_front <- unique(rbind(pareto_front, pareto_result))
+      }
+    } else {
+      if (tolower(opt) == "minimize") {
+        best <- tab[which.min(tab$func_values), ]
+        worst <- tab[which.max(tab$func_values), ]
+      } else {
+        best <- tab[which.max(tab$func_values), ]
+        worst <- tab[which.min(tab$func_values), ]
+      }
+      best_each_iter[i] <- best$func_values
     }
-    else if(tolower(opt) == "maximize"){
-      worst <- tab[which.min(tab[ , ncol(tab)]) , ]
-      best <- tab[which.max(tab[ , ncol(tab)]) , ]
-    }
-
-    best_each_iter <- c(best_each_iter, best[, ncol(best)])
-
-    # Increment iterator
-    i <- i + 1
   }
 
-  # Give names to columns of best
-  names_list <- NULL
-  for (i in 1:n_var) {
-    names_list <- c(names_list, paste0("x",i))
+  # Clean up final Pareto front for multi-objective
+  if (is_multi_objective) {
+    pareto_front <- na.omit(unique(pareto_front))
+  } else {
+    colnames(best) <- c(paste0("x", 1:n_var), "f(x)")
+    rownames(best) <- "Best"
   }
 
-  names_list <- c(names_list, "f(x)")
-  colnames(best) <- names_list
-  row.names(best) <- "Best"
+  # Stop parallel cluster
+  if (parallel) parallel::stopCluster(cl)
 
-  # Return best
-  result <- list(best)
-  names(result) <- c("Best")
+  # Prepare result list
+  result <- list("Best" = if (!is_multi_objective) best else NULL, "Iterations" = if (!is_multi_objective) best_each_iter else NULL)
+  if (is_multi_objective) {
+    result$Pareto_Front <- pareto_front
+  }
 
-  p <- list("fun" = fun, "best" = best, "lower" = lower, "upper" = upper, "popSize" = popSize,
-            "maxiter" = maxiter, "n_var" = n_var, "suggestions" = suggestions, "opt" = opt, "values_each_iter" = best_each_iter)
 
-  #setClass(Class = "jaya", representation(params = "list", best = "data.frame"))
+  # Set attributes for summary
+  attr(result, "popSize") <- popSize
+  attr(result, "maxiter") <- maxiter
+  attr(result, "n_var") <- n_var
+  attr(result, "opt") <- opt
+  attr(result, "lower") <- lower
+  attr(result, "upper") <- upper
+  attr(result, "fun") <- fun  # store function for display
 
-  #return(new(Class = "jaya", params = p, best = best))
-  class(p) <- c("jaya", class(p))
-  print(p$fun)
-  print(p$best)
-  return(invisible(p))
-  #return(p)
+  class(result) <- "jaya"
+  return(result)
 }

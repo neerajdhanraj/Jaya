@@ -2,44 +2,91 @@
 % Please edit documentation in R/jaya.R
 \name{jaya}
 \alias{jaya}
-\title{Jaya Algorithm, a gradient-free optimization algorithm.
-Maximization of a function using Jaya Algorithm (JA).
-A population based method which repeatedly modifies a population of individual solutions.
-Capable of solving both constrained and unconstrained optimization problems.
-Does not contain any hyperparameters.}
+\title{Jaya Algorithm for Single-Objective Optimization}
 \usage{
-jaya(fun, lower, upper, popSize = 50, maxiter, n_var, seed = NULL,
-  suggestions = data.frame(), opt = "minimize")
+jaya(
+  fun = NULL,
+  lower,
+  upper,
+  popSize = 50,
+  maxiter,
+  n_var,
+  seed = NULL,
+  suggestions = data.frame(),
+  opt = "minimize",
+  objectives = NULL,
+  constraints = list(),
+  early_stopping = FALSE,
+  tolerance = 1e-06,
+  patience = 10,
+  adaptive_pop = FALSE,
+  min_popSize = 20,
+  max_popSize = 100,
+  parallel = FALSE,
+  cores = NULL
+)
 }
 \arguments{
-\item{fun}{as a function to be optimized}
+\item{fun}{Objective function to be minimized or maximized (single-objective).}
 
-\item{lower}{as a vector of lower bounds for the vaiables in the function}
+\item{lower}{Vector of lower bounds for the decision variables.}
 
-\item{upper}{as a vector of upper bounds for the vaiables in the function}
+\item{upper}{Vector of upper bounds for the decision variables.}
 
-\item{popSize}{as population size}
+\item{popSize}{Size of the population for the optimization process.}
 
-\item{maxiter}{as number of iterations to run for finding optimum solution}
+\item{maxiter}{Maximum number of iterations.}
 
-\item{n_var}{as number of variables used in the function to optimize}
+\item{n_var}{Number of decision variables.}
 
-\item{seed}{as an integer vector containing the random number generator state}
+\item{seed}{Optional random seed for reproducibility.}
 
-\item{suggestions}{as a data frame of solutions string to be included in the initial population}
+\item{suggestions}{Optional data frame of initial population suggestions.}
 
-\item{opt}{as a string either "maximize" or "minimize" the function}
+\item{opt}{Specify whether to "minimize" or "maximize" the objective function.}
+
+\item{objectives}{(optional) A list of functions for multi-objective optimization.}
+
+\item{constraints}{(optional) A list of constraints as functions returning <= 0 for feasibility.}
+
+\item{early_stopping}{Logical. If TRUE, stops optimization early based on tolerance and patience.}
+
+\item{tolerance}{Numeric. Tolerance for early stopping.}
+
+\item{patience}{Integer. Number of iterations to wait for improvement before stopping early.}
+
+\item{adaptive_pop}{Logical. If TRUE, enables adaptive population size adjustment.}
+
+\item{min_popSize}{Integer. Minimum population size for adaptive adjustment.}
+
+\item{max_popSize}{Integer. Maximum population size for adaptive adjustment.}
+
+\item{parallel}{Logical. If TRUE, enables parallel computation for evaluating population.}
+
+\item{cores}{Integer. Number of cores to use for parallel computation. Defaults to all available cores minus one.}
+}
+\value{
+A list containing the following:
+- `Best`: The best solution found (variable values and objective function value).
+- `Iterations`: Best objective function values at each iteration.
 }
 \description{
-Jaya Algorithm, a gradient-free optimization algorithm.
-Maximization of a function using Jaya Algorithm (JA).
-A population based method which repeatedly modifies a population of individual solutions.
-Capable of solving both constrained and unconstrained optimization problems.
-Does not contain any hyperparameters.
+Implements the Jaya optimization algorithm for single-objective optimization.
+The algorithm minimizes or maximizes the given objective function over specified bounds.
 }
 \examples{
-# Test Function to minimize
-square <- function(x){return((x[1]^2)+(x[2]^2))}
-jaya(fun = square, lower = c(-100,-100), upper = c(100,100), maxiter = 10, n_var = 2)
+# Example: Single-objective optimization
+sphere_function <- function(x) sum(x^2)
+result <- jaya(
+  fun = sphere_function,
+  lower = rep(-5, 3),
+  upper = rep(5, 3),
+  popSize = 20,
+  maxiter = 50,
+  n_var = 3,
+  opt = "minimize"
+)
+print(summary(result))
+plot(result)
+
 }
-\keyword{optimization}
